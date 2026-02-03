@@ -6,52 +6,59 @@ st.title(":cup_with_straw: Customize Your Smoothie :cup_with_straw:")
 cnx = st.connection("snowflake")
 session = cnx.session()
 
+# --- FUNCIÓN DE LIMPIEZA AUTOMÁTICA ---
+# Esto elimina todo excepto los 3 registros más nuevos cada vez que usas la app
+def cleanup_old_orders():
+    session.sql("""
+        DELETE FROM SMOOTHIES.PUBLIC.ORDERS 
+        WHERE ORDER_ID NOT IN (
+            SELECT ORDER_ID FROM SMOOTHIES.PUBLIC.ORDERS 
+            ORDER BY ORDER_ID DESC LIMIT 3
+        )
+    """).collect()
+
+cleanup_old_orders()
+
 # --- SECCIÓN DE PEDIDOS ---
-st.subheader("Place an Order")
 name_on_order = st.text_input('Name on Smoothie:').strip()
 
 if name_on_order:
     my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
-    ingredients_list = st.multiselect('Choose up to 5 ingredients:', my_dataframe, max_selections=5)
+    ingredients_list = st.multiselect('Choose ingredients:', my_dataframe)
 
     if ingredients_list:
-        # UNIÓN PERFECTA: Un solo espacio entre frutas, sin espacios al final
         ingredients_string = ' '.join(ingredients_list).strip()
         
         if st.button('Submit Order'):
-            # Insertamos con ORDER_FILLED = FALSE por defecto y TIMESTAMP
-            my_insert_stmt = f"""
-                INSERT INTO smoothies.public.orders (ingredients, name_on_order, order_filled, order_ts)
-                VALUES ('{ingredients_string}', '{name_on_order}', FALSE, CURRENT_TIMESTAMP())
-            """
-            session.sql(my_insert_stmt).collect()
-            st.success(f'Order placed for {name_on_order}!', icon="✅")
+            # Insertamos con el formato exacto para el HASH de DORA
+            session.sql(f"""
+                INSERT INTO SMOOTHIES.PUBLIC.ORDERS (INGREDIENTS, NAME_ON_ORDER, ORDER_FILLED)
+                VALUES ('{ingredients_string}', '{name_on_order}', FALSE)
+            """).collect()
+            st.success(f'Order placed for {name_on_order}!')
+            st.rerun() # Refrescamos para que la limpieza actúe
 
 st.divider()
 
-# --- SECCIÓN DE ADMINISTRACIÓN (Lógica de los 3 más recientes) ---
-st.subheader("Pending Orders (Last 3)")
+# --- SECCIÓN DE ADMINISTRACIÓN ---
+st.subheader("Pending Orders (Keeping only last 3)")
 
-# Esta consulta limpia visualmente y permite marcar como filled
-recent_orders = session.table("smoothies.public.orders") \
-                .order_by(desc("order_ts")) \
-                .limit(3)
-
-if recent_orders.count() > 0:
-    st.dataframe(recent_orders)
+try:
+    # Consultamos los últimos 3 registros
+    recent_orders = session.table("SMOOTHIES.PUBLIC.ORDERS").order_by(desc("ORDER_ID")).limit(3).collect()
     
-    # Solo permitimos marcar como filled los que aún están en FALSE
-    pending_list = recent_orders.filter(col("ORDER_FILLED") == False).to_pandas()
-    
-    if not pending_list.empty:
-        order_to_fill = st.selectbox("Select Name to Mark as Filled:", pending_list["NAME_ON_ORDER"])
+    if recent_orders:
+        st.dataframe(recent_orders)
         
-        if st.button("Mark as Filled"):
-            session.sql(f"""
-                UPDATE smoothies.public.orders 
-                SET ORDER_FILLED = TRUE 
-                WHERE NAME_ON_ORDER = '{order_to_fill}'
-            """).collect()
-            st.rerun()
-else:
-    st.write("No orders found.")
+        # Filtramos solo los que están en FALSE para el selector
+        pending_names = [row['NAME_ON_ORDER'] for row in recent_orders if not row['ORDER_FILLED']]
+        
+        if pending_names:
+            order_to_fill = st.selectbox("Select Name to Mark as Filled:", pending_names)
+            if st.button("Mark as Filled"):
+                session.sql(f"UPDATE SMOOTHIES.PUBLIC.ORDERS SET ORDER_FILLED = TRUE WHERE NAME_ON_ORDER = '{order_to_fill}'").collect()
+                st.rerun()
+    else:
+        st.write("No orders found.")
+except Exception as e:
+    st.error(f"Error de base de datos: {e}")
