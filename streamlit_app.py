@@ -1,53 +1,57 @@
-# Import python packages
 import streamlit as st
-from snowflake.snowpark.functions import col
-import requests
+from snowflake.snowpark.functions import col, desc
 
-# Write directly to the app
 st.title(":cup_with_straw: Customize Your Smoothie :cup_with_straw:")
-st.write(
-    """Choose the fruits you want in your custom Smoothie!
-    """
-)
-name_on_order = st.text_input('Name on Smothie: ')
-st.write('The name on your Smoothie will be: ', name_on_order)
 
 cnx = st.connection("snowflake")
 session = cnx.session()
 
-my_dataframe = session.table(
-    "smoothies.public.fruit_options").select(col('FRUIT_NAME'), col('SEARCH_ON'))
-pd_df = my_dataframe.to_pandas()
+# --- SECCIÓN DE PEDIDOS ---
+st.subheader("Place an Order")
+name_on_order = st.text_input('Name on Smoothie:').strip()
 
+if name_on_order:
+    my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
+    ingredients_list = st.multiselect('Choose up to 5 ingredients:', my_dataframe, max_selections=5)
 
-ingredients_list = st.multiselect(
-    "Choose up to 5 ingredients",
-    my_dataframe,
-    max_selections=5
-)
-
-if ingredients_list:
-    
-    ingredients_string = ''
-
-    for fruit_chosen in ingredients_list:
-        ingredients_string += fruit_chosen + ' '
-
-        search_on=pd_df.loc[pd_df['FRUIT_NAME'] == fruit_chosen, 'SEARCH_ON'].iloc[0]
-        st.write('The search value for ', fruit_chosen,' is ', search_on, '.')
-
-        fruityvice_response = requests.get("https://fruityvice.com/api/fruit/"+search_on)
-        fv_dt = st.dataframe(data=fruityvice_response.json(), use_container_width=True)
-
-    st.write(ingredients_string)
-
-    my_insert_stmt = """ insert into smoothies.public.orders
-    (ingredients, name_on_order)
-    values ('""" + ingredients_string + """', '""" + name_on_order +"""')"""
-
-    time_to_insert = st.button('Submit Order')
-
-    if time_to_insert:
+    if ingredients_list:
+        # UNIÓN PERFECTA: Un solo espacio entre frutas, sin espacios al final
+        ingredients_string = ' '.join(ingredients_list).strip()
         
-        session.sql(my_insert_stmt).collect()
-        st.success('Your Smoothie is ordered, '+name_on_order+'!', icon="✅")
+        if st.button('Submit Order'):
+            # Insertamos con ORDER_FILLED = FALSE por defecto y TIMESTAMP
+            my_insert_stmt = f"""
+                INSERT INTO smoothies.public.orders (ingredients, name_on_order, order_filled, order_ts)
+                VALUES ('{ingredients_string}', '{name_on_order}', FALSE, CURRENT_TIMESTAMP())
+            """
+            session.sql(my_insert_stmt).collect()
+            st.success(f'Order placed for {name_on_order}!', icon="✅")
+
+st.divider()
+
+# --- SECCIÓN DE ADMINISTRACIÓN (Lógica de los 3 más recientes) ---
+st.subheader("Pending Orders (Last 3)")
+
+# Esta consulta limpia visualmente y permite marcar como filled
+recent_orders = session.table("smoothies.public.orders") \
+                .order_by(desc("order_ts")) \
+                .limit(3)
+
+if recent_orders.count() > 0:
+    st.dataframe(recent_orders)
+    
+    # Solo permitimos marcar como filled los que aún están en FALSE
+    pending_list = recent_orders.filter(col("ORDER_FILLED") == False).to_pandas()
+    
+    if not pending_list.empty:
+        order_to_fill = st.selectbox("Select Name to Mark as Filled:", pending_list["NAME_ON_ORDER"])
+        
+        if st.button("Mark as Filled"):
+            session.sql(f"""
+                UPDATE smoothies.public.orders 
+                SET ORDER_FILLED = TRUE 
+                WHERE NAME_ON_ORDER = '{order_to_fill}'
+            """).collect()
+            st.rerun()
+else:
+    st.write("No orders found.")
