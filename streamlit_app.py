@@ -19,8 +19,9 @@ if ingredients_list:
     ingredients_string = ' '.join(ingredients_list).strip()
     
     # Usamos f-strings para el INSERT (más limpio)
-    my_insert_stmt = f"""INSERT INTO smoothies.public.orders(ingredients, name_on_order) 
-                        VALUES ('{ingredients_string}','{name_on_order}')"""
+    # Modifica esta parte en tu código:
+    my_insert_stmt = f"""INSERT INTO smoothies.public.orders(ingredients, name_on_order, order_filled) 
+                    VALUES ('{ingredients_string}','{name_on_order}', FALSE)"""
     
     if st.button('Submit Order'):
         session.sql(my_insert_stmt).collect()
