@@ -1,31 +1,41 @@
+# Import python packages
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-from snowflake.snowpark.functions import col
+from snowflake.snowpark.functions import col, when_matched
 
+# Título
 st.title(":cup_with_straw: Pending Smoothie Orders :cup_with_straw:")
 
-# Esto NO fallará si estás dentro de Snowsight
-session = get_active_session()
+# CONEXIÓN: Esta línea solo funciona si estás DENTRO de Snowflake
+try:
+    session = get_active_session()
+except:
+    st.error("Error crítico: Esta app debe ejecutarse desde dentro de Snowflake (Snowsight), no desde Streamlit Cloud externo.")
+    st.stop()
 
-# Solo mostramos lo que no está entregado
-my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED") == 0)
+# Carga de datos
+my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED")==0)
 
+# Mostrar datos si existen
 if my_dataframe.count() > 0:
-    # El editor de datos
+    # Convertimos a Pandas para el editor
     editable_df = st.data_editor(my_dataframe.to_pandas())
     
-    if st.button('Submit'):
+    submitted = st.button('Submit')
+    
+    if submitted:
         try:
-            # Convertimos los cambios y actualizamos
+            og_dataset = session.table("smoothies.public.orders")
             edited_dataset = session.create_dataframe(editable_df)
-            
-            # Usamos SQL directo para asegurar que no haya errores de esquema
-            for row in editable_df.itertuples():
-                session.sql(f"UPDATE smoothies.public.orders SET ORDER_FILLED = {row.ORDER_FILLED} WHERE NAME_ON_ORDER = '{row.NAME_ON_ORDER}'").collect()
-            
-            st.success('¡Órdenes actualizadas!', icon='👍')
-            st.rerun()
+
+            og_dataset.merge(
+                edited_dataset,
+                (og_dataset['ORDER_UID'] == edited_dataset['ORDER_UID']),
+                [when_matched().update({'ORDER_FILLED': edited_dataset['ORDER_FILLED']})]
+            )
+            st.success('¡Orden actualizada!', icon='👍')
+            st.experimental_rerun()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f'Algo salió mal: {e}')
 else:
-    st.success('¡No hay órdenes pendientes!', icon='👍')
+    st.success('No hay órdenes pendientes ahora mismo', icon='👍')
