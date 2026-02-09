@@ -3,28 +3,22 @@ from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col, when_matched
 
 st.title(":cup_with_straw: Pending Smoothie Orders :cup_with_straw:")
-st.write("Orders that need to be filled")
 
-# DENTRO de Snowflake, esto funciona automáticamente
+# Esta línea SOLO funciona si la App se ejecuta DENTRO de Snowflake (Snowsight)
 session = get_active_session()
 
-# Obtenemos la tabla como un DataFrame de Snowpark
-# No usamos .collect() para que el merge funcione después
-query_df = session.table("smoothies.public.orders").filter(col("ORDER_FILLED") == 0)
+# Cargamos las órdenes
+my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED") == 0)
 
-if query_df.count() > 0:
-    # Convertimos a Pandas para que st.data_editor sea interactivo
-    editable_df = st.data_editor(query_df.to_pandas())
+if my_dataframe.count() > 0:
+    # Mostramos el editor
+    editable_df = st.data_editor(my_dataframe.to_pandas())
     
-    submitted = st.button('Submit')
-    
-    if submitted:
+    if st.button('Submit'):
         try:
-            # Convertimos los cambios del editor de vuelta a Snowpark
-            edited_dataset = session.create_dataframe(editable_df)
             og_dataset = session.table("smoothies.public.orders")
+            edited_dataset = session.create_dataframe(editable_df)
 
-            # Aplicamos los cambios a la tabla original
             og_dataset.merge(
                 edited_dataset,
                 (og_dataset['ORDER_UID'] == edited_dataset['ORDER_UID']),
@@ -32,8 +26,7 @@ if query_df.count() > 0:
             )
             st.success('Order(s) updated!', icon='👍')
             st.rerun()
-            
         except Exception as e:
-            st.error(f'Error updating: {e}')
+            st.error(f'Error: {e}')
 else:
-    st.success('There are no pending orders right now', icon='👍')
+    st.success('No pending orders!', icon='👍')
