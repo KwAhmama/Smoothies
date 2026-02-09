@@ -5,33 +5,33 @@ from snowflake.snowpark.functions import col, when_matched
 st.title(":cup_with_straw: Pending Smoothie Orders :cup_with_straw:")
 st.write("Orders that need to be filled")
 
-# Esta función es la que te da el error en la web externa
-# Pero funcionará perfecto DENTRO de Snowflake (Snowsight)
+# Usamos la sesión activa (Asegúrate de ejecutar esto DENTRO de Snowflake)
 session = get_active_session()
 
-# 1. Cargamos los datos (sin .collect() al principio)
-my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED")==0)
+# 1. Cargamos las órdenes pendientes
+# Importante: No usamos .collect() aquí para mantener el objeto de Snowpark
+my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED") == 0)
 
 if my_dataframe.count() > 0:
-    # 2. Convertimos a Pandas para que el editor sea interactivo
+    # 2. Mostramos el editor (convertimos a Pandas para la interfaz)
     editable_df = st.data_editor(my_dataframe.to_pandas())
     
     submitted = st.button('Submit')
     
     if submitted:
         try:
-            # 3. Preparamos los datos editados para el merge
+            # 3. Preparamos la actualización
             og_dataset = session.table("smoothies.public.orders")
             edited_dataset = session.create_dataframe(editable_df)
 
-            # 4. Actualizamos Snowflake
+            # 4. Hacemos el MERGE basado en ORDER_UID
             og_dataset.merge(
                 edited_dataset,
                 (og_dataset['ORDER_UID'] == edited_dataset['ORDER_UID']),
                 [when_matched().update({'ORDER_FILLED': edited_dataset['ORDER_FILLED']})]
             )
             st.success('Order(s) updated!', icon='👍')
-            st.rerun() # Refresca para limpiar las órdenes ya enviadas
+            st.rerun()
             
         except Exception as e:
             st.error(f'Something went wrong: {e}')
