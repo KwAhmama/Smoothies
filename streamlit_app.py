@@ -1,40 +1,37 @@
-# Import python packages
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col, when_matched
 
-# Write directly to the app
 st.title(":cup_with_straw: Pending Smoothie Orders :cup_with_straw:")
 st.write("Orders that need to be filled")
 
+# Esta función es la que te da el error en la web externa
+# Pero funcionará perfecto DENTRO de Snowflake (Snowsight)
 session = get_active_session()
 
-# 1. Obtenemos el DataFrame de Snowpark
-# Quitamos .collect() para que siga siendo un objeto de datos procesable
-my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED") == 0)
+# 1. Cargamos los datos (sin .collect() al principio)
+my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED")==0)
 
-# 2. Convertimos a Pandas para que st.data_editor funcione correctamente
 if my_dataframe.count() > 0:
+    # 2. Convertimos a Pandas para que el editor sea interactivo
     editable_df = st.data_editor(my_dataframe.to_pandas())
     
     submitted = st.button('Submit')
     
     if submitted:
         try:
-            # 3. Convertimos los cambios de vuelta a un DataFrame de Snowpark
+            # 3. Preparamos los datos editados para el merge
             og_dataset = session.table("smoothies.public.orders")
             edited_dataset = session.create_dataframe(editable_df)
 
-            # 4. Realizamos el Merge para actualizar los registros
+            # 4. Actualizamos Snowflake
             og_dataset.merge(
                 edited_dataset,
                 (og_dataset['ORDER_UID'] == edited_dataset['ORDER_UID']),
                 [when_matched().update({'ORDER_FILLED': edited_dataset['ORDER_FILLED']})]
             )
             st.success('Order(s) updated!', icon='👍')
-            
-            # Refrescar la página para que desaparezcan las órdenes completadas
-            st.rerun()
+            st.rerun() # Refresca para limpiar las órdenes ya enviadas
             
         except Exception as e:
             st.error(f'Something went wrong: {e}')
